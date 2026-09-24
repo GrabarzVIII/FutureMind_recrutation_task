@@ -16,6 +16,9 @@ def main() -> None:
     print(f"{df['revenue'].isna().sum()} NA revenues")
     print(f"{df['theaters'].isna().sum()} NA theaters")
     print(f"{df['distributor'].isna().sum()} NA distributors")
+    print(f"{df['id'].isna().sum()} NA ids")
+    print(f"unique non-null id for every row: {df['id'].is_unique and df['id'].notna().all()}")
+    print(f"duplicate ids beyond first occurrence: {df['id'].dropna().duplicated().sum()}")
 
 
     df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d", errors="raise")
