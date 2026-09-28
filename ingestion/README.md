@@ -1,6 +1,6 @@
 # GCP ingestion
 
-Project: **futuremind-rekru-proj**. BigQuery location: **EU**.
+Project: **PROJECT_ID**. BigQuery location: **EU**.
 Only `OMDB_API_KEY` comes from an environment variable, injected from Secret Manager.
 
 This stage includes ingestion functions, BigQuery SQL and a local Workflow definition
@@ -26,7 +26,7 @@ with `CREATE TABLE ... LIKE`; a second JSON schema is not needed.
 
 ## Processing
 
-1. Upload CSV to `gs://futuremind_bucket/ravenue_data/revenues_per_day.csv`.
+1. Upload CSV to `gs://BUCKET_NAME/CSV_PATH/revenues_per_day.csv`.
 2. Workflows generates run_id and calls the CSV function.
 3. The function loads CSV directly into staging; it never downloads the file locally.
 4. SQL merges revenue by id, registers new source titles and drops CSV staging.
@@ -40,15 +40,15 @@ with `CREATE TABLE ... LIKE`; a second JSON schema is not needed.
    updates movie/batch statuses. Staging is dropped after successful finalization.
 9. Workflows continues with another batch until its budget or available work is exhausted.
 
-Output: `gs://futuremind_bucket/batch_film_folder /<batch_id>.ndjson`.
+Output: `gs://BUCKET_NAME/OMDB_PREFIX/<batch_id>.ndjson`.
 The folder name has a trailing space, matching the supplied Console URL.
 `ops.omdb_batches` stores file_name and the full file_uri.
 
 ## Workflow deployment values
 
 Paste the entire `workflows/ingestion.yaml` into the GCP Workflows YAML editor.
-The top of the file contains the supplied function URLs, Dataform region europe-west1,
-repository futuremind-dataform-repository and execution service account. Verify these
+The top of the file contains the supplied function URLs, the configured Dataform region,
+repository DATAFORM_REPOSITORY_ID and execution service account. Verify these
 values before deployment. The `production` release
 configuration must exist and point to `main`, with BigQuery location EU in workflow_settings.yaml.
 The Dataform repository region is separate from the BigQuery data location.
@@ -92,7 +92,7 @@ Local YAML validation does not replace deployment validation or an end-to-end cl
 
 Enable the required GCP services. Prepare BigQuery manually in the GCP Console:
 
-1. In project `futuremind-rekru-proj`, create datasets `staging`, `bronze` and `ops`
+1. In project `PROJECT_ID`, create datasets `staging`, `bronze` and `ops`
    with location `EU`.
 2. Execute each SQL file from `ingestion/sql/tables/` in the BigQuery editor.
 3. Execute each SQL file from `ingestion/sql/procedures/` in the BigQuery editor.
@@ -162,12 +162,12 @@ flowchart TD
 
 Authoritative columns and types are in ingestion/sql/tables. All timestamps are UTC.
 bronze.revenue.source_movie_id is populated by register_movies after the CSV merge.
-For existing deployments, run ALTER TABLE `futuremind-rekru-proj.bronze.revenue`
+For existing deployments, run ALTER TABLE `PROJECT_ID.bronze.revenue`
 ADD COLUMN IF NOT EXISTS source_movie_id INT64, replace the register_movies procedure,
-then CALL `futuremind-rekru-proj.ops.register_movies`() to backfill existing rows.
+then CALL `PROJECT_ID.ops.register_movies`() to backfill existing rows.
 Silver revenue reads this key directly; it must not recompute the movie identity.
 bronze.revenue.source_file stores the full CSV GCS URI supplied as csv_uri, for example
-`gs://futuremind_bucket/ravenue_data/revenues_per_day.csv`. It records the file that
+`gs://BUCKET_NAME/CSV_PATH/revenues_per_day.csv`. It records the file that
 inserted or last changed the row; unchanged rows retain their existing metadata.
 ops.pipeline_runs.source_table still identifies the run-specific staging table for diagnostics.
 For an existing bronze.revenue table, add source_file STRING before deploying the updated

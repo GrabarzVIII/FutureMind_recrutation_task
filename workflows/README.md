@@ -9,16 +9,16 @@ Settings are at the top of the YAML:
 
 | Setting | Configured value / purpose |
 |---|---|
-| project | futuremind-rekru-proj |
+| project | PROJECT_ID |
 | csv_function_url | Deployed CSV Cloud Run function URL |
 | omdb_function_url | Deployed OMDb Cloud Run function URL |
 | dataform_region | europe-west1 |
-| dataform_repository | futuremind-dataform-repository |
+| dataform_repository | DATAFORM_REPOSITORY_ID |
 | dataform_release | production; must point to main |
 | dataform_service_account | Account used to execute Dataform BigQuery actions |
 | api_budget | 900 for both one run and the UTC day |
 | batch_size | At most 50 films per batch |
-| csv_uri | gs://futuremind_bucket/ravenue_data/revenues_per_day.csv |
+| csv_uri | gs://BUCKET_NAME/CSV_PATH/revenues_per_day.csv |
 | omdb_prefix | `batch_film_folder ` ? includes a trailing space |
 
 BigQuery jobs use EU. The Dataform region is a service region, independent of the

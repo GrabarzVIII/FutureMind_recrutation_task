@@ -1,4 +1,4 @@
-# FutureMind recruitment task ? movie box office analytics
+# FutureMind recruitment task - movie box office analytics
 
 An end-to-end GCP pipeline that loads daily movie revenue from CSV, enriches movies
 with OMDb metadata and builds a dimensional model for a three-page Looker Studio report.
@@ -23,7 +23,7 @@ flowchart LR
     GO --> L[Looker Studio]
 ```
 
-Project: `futuremind-rekru-proj`. BigQuery datasets are in `EU`; the configured
+Project: `PROJECT_ID`. BigQuery datasets are in `EU`; the configured
 Dataform repository and Cloud Run functions are in `europe-west1`.
 The diagram shows the orchestrated sequence; Dataform reads both Bronze tables.
 
@@ -78,7 +78,7 @@ BigQuery constraints are not declared by the current SQLX definitions.
 
 ## Pipeline behavior
 
-1. Upload the CSV manually to `gs://futuremind_bucket/ravenue_data/revenues_per_day.csv`.
+1. Upload the CSV manually to `gs://BUCKET_NAME/CSV_PATH/revenues_per_day.csv`.
 2. Workflows generates a run ID and records execution in `ops.pipeline_runs`.
 3. The CSV function loads a run-specific staging table. SQL validates and merges by
    source id, then registers movies and populates `bronze.revenue.source_movie_id`.
