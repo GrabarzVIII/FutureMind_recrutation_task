@@ -1,0 +1,5 @@
+dataformCoreVersion: 3.0.43
+defaultProject: futuremind-rekru-proj
+defaultLocation: EU
+defaultDataset: silver
+defaultAssertionDataset: dataform_assertions
