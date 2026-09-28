@@ -2,7 +2,6 @@ config {
   type: "table",
   schema: "gold",
   name: "dim_distributor",
-  description: "Distributors appearing in revenue data."
 }
 
 SELECT DISTINCT

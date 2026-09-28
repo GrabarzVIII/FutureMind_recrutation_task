@@ -2,7 +2,6 @@ config {
   type: "table",
   schema: "gold",
   name: "fact_daily_revenue",
-  description: "Daily movie revenue records.",
   bigquery: {
     partitionBy: "revenue_date",
     clusterBy: ["movie_key", "distributor_key"]

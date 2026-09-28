@@ -2,7 +2,6 @@ config {
   type: "table",
   schema: "gold",
   name: "dim_movie",
-  description: "Movies successfully fetched from OMDb."
 }
 
 SELECT
