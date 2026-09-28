@@ -3,6 +3,10 @@
 Project: **futuremind-rekru-proj**. BigQuery location: **EU**.
 Only `OMDB_API_KEY` comes from an environment variable, injected from Secret Manager.
 
+This stage includes ingestion functions and BigQuery SQL. The Workflow file described
+below is not included yet; it will be published with the Dataform orchestration stage.
+The complete pipeline has not yet been validated end-to-end in GCP.
+
 ## Files
 
 ```text
