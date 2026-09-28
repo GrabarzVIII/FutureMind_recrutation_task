@@ -1,0 +1,26 @@
+config {
+  type: "table",
+  schema: "gold",
+  name: "fact_daily_revenue",
+  description: "Daily movie revenue records.",
+  bigquery: {
+    partitionBy: "revenue_date",
+    clusterBy: ["movie_key", "distributor_key"]
+  }
+}
+
+SELECT
+  revenue_id,
+  source_movie_id AS movie_key,
+
+  FARM_FINGERPRINT(
+    TO_JSON_STRING(
+      STRUCT(distributor AS distributor)
+    )
+  ) AS distributor_key,
+
+  revenue_date,
+  revenue,
+  theaters
+
+FROM ${ref("silver", "revenue")}
