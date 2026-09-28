@@ -1,0 +1,26 @@
+config {
+  type: "table",
+  schema: "silver",
+  name: "revenue",
+  bigquery: {
+    partitionBy: "revenue_date",
+    clusterBy: ["source_movie_id"]
+  }
+}
+
+SELECT
+  id AS revenue_id,
+  source_movie_id,
+  date AS revenue_date,
+  title AS source_title,
+  revenue,
+  theaters,
+
+  CASE
+    WHEN distributor IS NULL
+      OR TRIM(distributor) IN ('', 'N/A')
+      THEN NULL
+    ELSE TRIM(distributor)
+  END AS distributor
+
+FROM ${ref("bronze", "revenue")}

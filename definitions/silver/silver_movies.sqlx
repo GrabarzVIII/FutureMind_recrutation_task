@@ -1,0 +1,40 @@
+config {
+  type: "table",
+  schema: "silver",
+  name: "movies",
+}
+
+SELECT
+  source_movie_id,
+  requested_title AS source_title,
+
+  JSON_VALUE(payload, '$.imdbID') AS imdb_id,
+  JSON_VALUE(payload, '$.Title') AS omdb_title,
+
+  SAFE_CAST(
+    JSON_VALUE(payload, '$.Year') AS INT64
+  ) AS release_year,
+
+  NULLIF(JSON_VALUE(payload, '$.Genre'), 'N/A') AS genres,
+  NULLIF(JSON_VALUE(payload, '$.Director'), 'N/A') AS director,
+  NULLIF(JSON_VALUE(payload, '$.Country'), 'N/A') AS country,
+
+  SAFE_CAST(
+    JSON_VALUE(payload, '$.imdbRating') AS NUMERIC
+  ) AS imdb_rating,
+
+  SAFE_CAST(
+    REPLACE(JSON_VALUE(payload, '$.imdbVotes'), ',', '') AS INT64
+  ) AS imdb_votes,
+
+  requested_at AS omdb_fetched_at
+
+FROM ${ref("bronze", "omdb_responses")}
+
+WHERE outcome = 'succeeded'
+  AND is_final = TRUE
+
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY source_movie_id
+  ORDER BY requested_at DESC, loaded_at DESC, attempt_id DESC
+) = 1

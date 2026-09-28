@@ -1,0 +1,194 @@
+config {
+  type: "view",
+  schema: "gold",
+  name: "report_data_quality_summary",
+  description: "Whole-dataset reconciliation, key integrity and OMDb coverage."
+}
+
+WITH bronze_stats AS (
+  SELECT
+    COUNT(*) AS bronze_row_count,
+    COALESCE(SUM(revenue), 0) AS bronze_total_revenue,
+
+    COUNTIF(
+      id IS NULL OR TRIM(id) = ''
+    ) AS bronze_missing_revenue_id_count,
+
+    COUNTIF(
+      id IS NOT NULL AND TRIM(id) != ''
+    ) - COUNT(DISTINCT IF(
+      id IS NOT NULL AND TRIM(id) != '',
+      id,
+      NULL
+    )) AS bronze_duplicate_revenue_id_count
+
+  FROM ${ref("bronze", "revenue")}
+),
+
+silver_stats AS (
+  SELECT
+    COUNT(*) AS silver_row_count,
+    COALESCE(SUM(revenue), 0) AS silver_total_revenue,
+
+    COUNTIF(
+      revenue_id IS NULL OR TRIM(revenue_id) = ''
+    ) AS silver_missing_revenue_id_count,
+
+    COUNTIF(
+      revenue_id IS NOT NULL AND TRIM(revenue_id) != ''
+    ) - COUNT(DISTINCT IF(
+      revenue_id IS NOT NULL AND TRIM(revenue_id) != '',
+      revenue_id,
+      NULL
+    )) AS silver_duplicate_revenue_id_count,
+
+    COUNTIF(
+      source_movie_id IS NULL
+    ) AS silver_missing_movie_id_count
+
+  FROM ${ref("silver", "revenue")}
+),
+
+gold_stats AS (
+  SELECT
+    COUNT(*) AS gold_row_count,
+    COALESCE(SUM(revenue), 0) AS gold_total_revenue,
+
+    COUNTIF(
+      revenue_id IS NULL OR TRIM(revenue_id) = ''
+    ) AS gold_missing_revenue_id_count,
+
+    COUNTIF(
+      revenue_id IS NOT NULL AND TRIM(revenue_id) != ''
+    ) - COUNT(DISTINCT IF(
+      revenue_id IS NOT NULL AND TRIM(revenue_id) != '',
+      revenue_id,
+      NULL
+    )) AS gold_duplicate_revenue_id_count
+
+  FROM ${ref("gold", "fact_daily_revenue")}
+),
+
+movie_dimension_stats AS (
+  SELECT
+    COUNTIF(
+      movie_key IS NULL
+    ) AS missing_movie_dimension_key_count,
+
+    COUNT(movie_key)
+      - COUNT(DISTINCT movie_key) AS duplicate_movie_key_count
+
+  FROM ${ref("gold", "dim_movie")}
+),
+
+distributor_dimension_stats AS (
+  SELECT
+    COUNTIF(
+      distributor_key IS NULL
+    ) AS missing_distributor_dimension_key_count,
+
+    COUNT(distributor_key)
+      - COUNT(DISTINCT distributor_key) AS duplicate_distributor_key_count
+
+  FROM ${ref("gold", "dim_distributor")}
+),
+
+movie_keys AS (
+  SELECT DISTINCT
+    movie_key
+  FROM ${ref("gold", "dim_movie")}
+  WHERE movie_key IS NOT NULL
+),
+
+distributor_keys AS (
+  SELECT DISTINCT
+    distributor_key
+  FROM ${ref("gold", "dim_distributor")}
+  WHERE distributor_key IS NOT NULL
+),
+
+source_movies AS (
+  SELECT DISTINCT
+    source_movie_id
+  FROM ${ref("silver", "revenue")}
+  WHERE source_movie_id IS NOT NULL
+),
+
+movie_coverage AS (
+  SELECT
+    COUNT(*) AS source_movie_count,
+
+    COUNTIF(
+      M.movie_key IS NOT NULL
+    ) AS matched_movie_count,
+
+    COUNTIF(
+      M.movie_key IS NULL
+    ) AS unmatched_movie_count
+
+  FROM source_movies S
+  LEFT JOIN movie_keys M
+    ON S.source_movie_id = M.movie_key
+),
+
+fact_coverage AS (
+  SELECT
+    COUNTIF(
+      F.movie_key IS NULL
+    ) AS fact_missing_movie_id_count,
+
+    COUNTIF(
+      M.movie_key IS NULL
+    ) AS fact_rows_without_movie_dimension,
+
+    COUNTIF(
+      D.distributor_key IS NULL
+    ) AS fact_rows_without_distributor_dimension,
+
+    COALESCE(
+      SUM(IF(M.movie_key IS NULL, F.revenue, 0)),
+      0
+    ) AS revenue_without_movie_dimension
+
+  FROM ${ref("gold", "fact_daily_revenue")} F
+
+  LEFT JOIN movie_keys M
+    ON F.movie_key = M.movie_key
+
+  LEFT JOIN distributor_keys D
+    ON F.distributor_key = D.distributor_key
+)
+
+SELECT
+  B.*,
+  S.*,
+  G.*,
+  MD.*,
+  DD.*,
+  MC.*,
+  FC.*,
+
+  S.silver_row_count
+    - B.bronze_row_count AS silver_minus_bronze_rows,
+
+  G.gold_row_count
+    - S.silver_row_count AS gold_minus_silver_rows,
+
+  S.silver_total_revenue
+    - B.bronze_total_revenue AS silver_minus_bronze_revenue,
+
+  G.gold_total_revenue
+    - S.silver_total_revenue AS gold_minus_silver_revenue,
+
+  SAFE_DIVIDE(
+    MC.matched_movie_count,
+    MC.source_movie_count
+  ) AS omdb_match_rate
+
+FROM bronze_stats B
+CROSS JOIN silver_stats S
+CROSS JOIN gold_stats G
+CROSS JOIN movie_dimension_stats MD
+CROSS JOIN distributor_dimension_stats DD
+CROSS JOIN movie_coverage MC
+CROSS JOIN fact_coverage FC

@@ -1,0 +1,16 @@
+config {
+  type: "table",
+  schema: "gold",
+  name: "dim_distributor",
+}
+
+SELECT DISTINCT
+  FARM_FINGERPRINT(
+    TO_JSON_STRING(
+      STRUCT(distributor AS distributor)
+    )
+  ) AS distributor_key,
+
+  COALESCE(distributor, 'Unknown') AS distributor_name
+
+FROM ${ref("silver", "revenue")}

@@ -1,0 +1,69 @@
+config {
+  type: "view",
+  schema: "gold",
+  name: "report_data_quality_daily",
+  description: "Current revenue data quality grouped by revenue date."
+}
+
+WITH matched_movies AS (
+  SELECT DISTINCT
+    source_movie_id
+  FROM ${ref("silver", "movies")}
+)
+
+SELECT
+  R.revenue_date,
+
+  COUNT(*) AS row_count,
+  SUM(R.revenue) AS total_revenue,
+
+  COUNTIF(
+    R.distributor IS NULL
+  ) AS missing_distributor_count,
+
+  COUNTIF(
+    R.theaters IS NULL
+  ) AS missing_theaters_count,
+
+  COUNTIF(
+    R.theaters = 0
+  ) AS zero_theaters_count,
+
+  COUNTIF(
+    R.theaters < 0
+  ) AS negative_theaters_count,
+
+  COUNTIF(
+    R.revenue = 0
+  ) AS zero_revenue_count,
+
+  COUNTIF(
+    R.revenue < 0
+  ) AS negative_revenue_count,
+
+  COUNTIF(
+    R.source_movie_id IS NULL
+  ) AS missing_movie_id_count,
+
+  COUNTIF(
+    M.source_movie_id IS NULL
+  ) AS unmatched_movie_row_count,
+
+  SUM(
+    IF(M.source_movie_id IS NULL, R.revenue, 0)
+  ) AS unmatched_movie_revenue,
+
+  SUM(
+    IF(R.distributor IS NULL, R.revenue, 0)
+  ) AS revenue_missing_distributor,
+
+  SUM(
+    IF(R.theaters IS NULL, R.revenue, 0)
+  ) AS revenue_missing_theaters
+
+FROM ${ref("silver", "revenue")} R
+
+LEFT JOIN matched_movies M
+  ON R.source_movie_id = M.source_movie_id
+
+GROUP BY R.revenue_date
