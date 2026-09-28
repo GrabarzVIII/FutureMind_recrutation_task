@@ -1,0 +1,20 @@
+config {
+  type: "table",
+  schema: "gold",
+  name: "dim_movie",
+  description: "Movies successfully fetched from OMDb."
+}
+
+SELECT
+  source_movie_id AS movie_key,
+  source_title,
+  COALESCE(omdb_title, source_title) AS movie_title,
+  imdb_id,
+  release_year,
+  genres,
+  director,
+  country,
+  imdb_rating,
+  imdb_votes
+
+FROM ${ref("silver", "movies")}
