@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS `futuremind-rekru-proj.bronze.revenue` (
   id STRING NOT NULL,
+  source_movie_id INT64,
   date DATE NOT NULL,
   title STRING NOT NULL,
   revenue NUMERIC NOT NULL,
@@ -10,5 +11,5 @@ CREATE TABLE IF NOT EXISTS `futuremind-rekru-proj.bronze.revenue` (
   run_id STRING,
   source_file STRING
 )
-PARTITION BY date
+PARTITION BY DATE_TRUNC(date, MONTH)
 CLUSTER BY id;

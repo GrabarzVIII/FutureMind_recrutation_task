@@ -30,6 +30,15 @@ BEGIN
     ))) > 1
   ) AS 'Movie ID hash collision: different source identities share the same ID';
 
+  BEGIN TRANSACTION;
+
+  -- Assign the same identity to every daily revenue row for the title.
+  UPDATE `futuremind-rekru-proj.bronze.revenue` R
+  SET source_movie_id = S.source_movie_id
+  FROM source_movies S
+  WHERE R.title = S.source_title
+    AND R.source_movie_id IS DISTINCT FROM S.source_movie_id;
+
   MERGE `futuremind-rekru-proj.ops.movie_fetch_control` T
   USING source_movies S
     ON T.source_movie_id = S.source_movie_id
@@ -60,4 +69,6 @@ BEGIN
   THEN UPDATE SET
     first_revenue_date = S.first_revenue_date,
     estimated_release_year = EXTRACT(YEAR FROM S.first_revenue_date);
+
+  COMMIT TRANSACTION;
 END;
