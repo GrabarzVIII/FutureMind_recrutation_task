@@ -1,0 +1,56 @@
+config {
+  type: "view",
+  schema: "gold",
+  name: "report_movie_revenue",
+  description: "Revenue records with movie and distributor attributes."
+}
+
+WITH source_titles AS (
+  SELECT
+    source_movie_id,
+    source_title
+  FROM ${ref("silver", "revenue")}
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY source_movie_id
+    ORDER BY revenue_date, revenue_id
+  ) = 1
+)
+
+SELECT
+  F.revenue_id,
+  F.movie_key,
+  F.distributor_key,
+  F.revenue_date,
+  F.revenue,
+  F.theaters,
+
+  COALESCE(
+    M.movie_title,
+    S.source_title,
+    CONCAT(
+      'Unknown movie [',
+      COALESCE(CAST(F.movie_key AS STRING), 'missing ID'),
+      ']'
+    )
+  ) AS movie_title,
+
+  M.release_year,
+  M.genres,
+  M.director,
+  M.country,
+  M.imdb_id,
+  M.imdb_rating,
+  M.imdb_votes,
+
+  COALESCE(D.distributor_name, 'Unknown') AS distributor_name
+
+FROM ${ref("gold", "fact_daily_revenue")} F
+
+LEFT JOIN ${ref("gold", "dim_movie")} M
+  ON F.movie_key = M.movie_key
+
+LEFT JOIN ${ref("gold", "dim_distributor")} D
+  ON F.distributor_key = D.distributor_key
+
+LEFT JOIN source_titles S
+  ON F.movie_key = S.source_movie_id
