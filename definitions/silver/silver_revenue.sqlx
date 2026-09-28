@@ -1,0 +1,55 @@
+config {
+  type: "table",
+  schema: "silver",
+  name: "revenue",
+  bigquery: {
+    partitionBy: "revenue_date",
+    clusterBy: ["source_movie_id"]
+  }
+}
+
+WITH first_revenue AS (
+  SELECT
+    title,
+    date AS first_revenue_date,
+    distributor AS first_distributor
+  FROM ${ref("bronze", "revenue")}
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY title
+    ORDER BY date, id
+  ) = 1
+),
+
+movie_mapping AS (
+  SELECT
+    title,
+    FARM_FINGERPRINT(
+      TO_JSON_STRING(
+        STRUCT(
+          title AS title,
+          first_revenue_date AS first_revenue_date,
+          first_distributor AS first_distributor
+        )
+      )
+    ) AS source_movie_id
+  FROM first_revenue
+)
+
+SELECT
+  R.id AS revenue_id,
+  M.source_movie_id,
+  R.date AS revenue_date,
+  R.title AS source_title,
+  R.revenue,
+  R.theaters,
+
+  CASE
+    WHEN R.distributor IS NULL
+      OR TRIM(R.distributor) IN ('', 'N/A')
+      THEN NULL
+    ELSE TRIM(R.distributor)
+  END AS distributor
+
+FROM ${ref("bronze", "revenue")} R
+JOIN movie_mapping M
+  ON R.title = M.title
