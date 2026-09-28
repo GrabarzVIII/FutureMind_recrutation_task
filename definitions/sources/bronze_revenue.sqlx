@@ -1,0 +1,6 @@
+config {
+  type: "declaration",
+  database: "futuremind-rekru-proj",
+  schema: "bronze",
+  name: "revenue"
+}
