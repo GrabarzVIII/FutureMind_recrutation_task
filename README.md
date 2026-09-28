@@ -30,7 +30,7 @@ The diagram shows the orchestrated sequence; Dataform reads both Bronze tables.
 ## Repository structure
 
 ```text
-assets/gold_er_diagram.png       ER diagram of the implemented Gold model
+assets/diagram.png       ER diagram of the implemented Gold model
 workflow_settings.yaml          Dataform project, EU location and default datasets
 definitions/
   sources/                      Declarations of existing Bronze tables
@@ -54,7 +54,7 @@ production ingestion. Function folders contain their deployment dependencies in
 
 ## Data model
 
-![Gold ER diagram](assets/gold_er_diagram.png)
+![Gold ER diagram](assets/diagram.png)
 
 | Table | Grain / purpose |
 |---|---|
