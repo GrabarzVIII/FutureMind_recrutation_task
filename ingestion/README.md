@@ -3,9 +3,10 @@
 Project: **futuremind-rekru-proj**. BigQuery location: **EU**.
 Only `OMDB_API_KEY` comes from an environment variable, injected from Secret Manager.
 
-This stage includes ingestion functions and BigQuery SQL. The Workflow file described
-below is not included yet; it will be published with the Dataform orchestration stage.
-The complete pipeline has not yet been validated end-to-end in GCP.
+This stage includes ingestion functions, BigQuery SQL and a local Workflow definition
+at `workflows/ingestion.yaml`, extended to execute Dataform after ingestion.
+A successful end-to-end GCP execution was reported during deployment. Changes to local
+files must still be deployed explicitly to their corresponding services.
 
 ## Files
 
@@ -16,7 +17,7 @@ ingestion/
   sql/tables/            Bronze and operational table definitions
   sql/procedures/        Revenue merge, movie registration, batch allocation/finalization
   README.md              Configuration, deployment, data contracts and recovery
-workflows/ingestion.yaml  Paste into GCP after setting the two function URLs
+workflows/ingestion.yaml  Complete pipeline definition for the GCP YAML editor
 ```
 
 There is no build or rendering step. SQL contains the actual project ID.
@@ -29,6 +30,8 @@ with `CREATE TABLE ... LIKE`; a second JSON schema is not needed.
 2. Workflows generates run_id and calls the CSV function.
 3. The function loads CSV directly into staging; it never downloads the file locally.
 4. SQL merges revenue by id, registers new source titles and drops CSV staging.
+   register_movies also assigns source_movie_id to all Bronze revenue rows, using
+   the same mapping as movie_fetch_control. Run Dataform only after registration succeeds.
 5. SQL assigns up to 50 not-yet-downloaded movies to a batch.
 6. The OMDb function tries the estimated release year, then the previous year only
    after Movie not found. Technical errors do not change the requested year.
@@ -41,12 +44,39 @@ Output: `gs://futuremind_bucket/batch_film_folder /<batch_id>.ndjson`.
 The folder name has a trailing space, matching the supplied Console URL.
 `ops.omdb_batches` stores file_name and the full file_uri.
 
+## Workflow deployment values
+
+Paste the entire `workflows/ingestion.yaml` into the GCP Workflows YAML editor.
+The top of the file contains the supplied function URLs, Dataform region europe-west1,
+repository futuremind-dataform-repository and execution service account. Verify these
+values before deployment. The `production` release
+configuration must exist and point to `main`, with BigQuery location EU in workflow_settings.yaml.
+The Dataform repository region is separate from the BigQuery data location.
+
+The Workflow creates a fresh compilation from this release, checks compilationErrors,
+executes that exact result with all actions, and polls every 30 seconds until completion.
+No separate Dataform workflow configuration or Dataform schedule is required.
+Reaching the OMDb budget still proceeds to Dataform. SQL/HTTP failures stop execution.
+The pipeline run is completed only after Dataform succeeds; Dataform failures are
+recorded as failed in ops.pipeline_runs. Every execution gets a new run_id. There is no automatic resume or persisted Dataform
+invocation checkpoint.
+
+The Workflows identity needs permission to create compilation results, invoke Dataform,
+read invocation status and act as the configured Dataform execution service account.
+The execution account needs BigQuery job creation, source read and output write access;
+configure the Dataform service agent to impersonate it as required by repository IAM.
+Deploy the updated register_movies procedure and source_movie_id column before running.
+Start manually with no input arguments first; configure the once-daily Scheduler trigger after validation.
+Local YAML validation does not replace deployment validation or an end-to-end cloud run.
+
 ## Request limits and recovery
 
 - Maximum planned requests per run: 900. An additional UTC-day cap is also 900.
 - Allocation reserves two calls per movie; completed batches contribute actual counts.
   With only one request left, allocation stops conservatively.
-- An execution normally needs no input (`{}`). To resume, supply the previous run_id.
+- Executions accept no input arguments. run_id always comes from the execution ID.
+  After a failure, inspect and manually resolve unfinished batches before the next run;
+  restarting the workflow does not resume their assigned movies.
 - Schedule the workflow once daily and ensure only one execution is active, including
   manual retries. There is no database lock preventing overlap. Recover a failed run
   before starting a new one; unfinished movie assignments and request reservations persist.
@@ -70,6 +100,10 @@ Enable the required GCP services. Prepare BigQuery manually in the GCP Console:
 Existing datasets must also be in EU. The SQL creates missing tables and replaces
 procedures; it does not migrate existing table schemas.
 CSV columns must be in this order: id,date,title,revenue,theaters,distributor.
+Revenue tables in Bronze, Silver and Gold use monthly date partitions. The historical
+CSV spans more than 4,000 days, so writing all daily partitions in one job can fail.
+Monthly partitioning preserves daily row granularity. Existing daily-partitioned tables
+must be migrated or recreated; CREATE TABLE IF NOT EXISTS does not change partitioning.
 Invalid IDs, dates or numbers fail before the revenue merge.
 
 Deploy authenticated HTTP functions with Python 3.12 and a 1800-second timeout:
@@ -79,7 +113,7 @@ Deploy authenticated HTTP functions with Python 3.12 and a 1800-second timeout:
 | ingestion/csv_function | load_revenue_csv | No environment variables |
 | ingestion/omdb_function | fetch_omdb | OMDB_API_KEY from Secret Manager |
 
-Use concurrency 1 and max instances 1 for OMDb. Replace the two URL placeholders at the
+Use concurrency 1 and max instances 1 for OMDb. Verify the settings at the
 top of `workflows/ingestion.yaml` and deploy it. The workflow deployment region is separate
 from the EU BigQuery location. Configure Cloud Scheduler separately if automatic scheduling
 is required; no scheduler is created by this repository.
@@ -127,6 +161,11 @@ flowchart TD
 | staging.omdb_RUN_ID | One batch's attempts, temporary | BigQuery load job |
 
 Authoritative columns and types are in ingestion/sql/tables. All timestamps are UTC.
+bronze.revenue.source_movie_id is populated by register_movies after the CSV merge.
+For existing deployments, run ALTER TABLE `futuremind-rekru-proj.bronze.revenue`
+ADD COLUMN IF NOT EXISTS source_movie_id INT64, replace the register_movies procedure,
+then CALL `futuremind-rekru-proj.ops.register_movies`() to backfill existing rows.
+Silver revenue reads this key directly; it must not recompute the movie identity.
 bronze.revenue.source_file stores the full CSV GCS URI supplied as csv_uri, for example
 `gs://futuremind_bucket/ravenue_data/revenues_per_day.csv`. It records the file that
 inserted or last changed the row; unchanged rows retain their existing metadata.

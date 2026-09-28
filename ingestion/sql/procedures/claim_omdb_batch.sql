@@ -50,8 +50,7 @@ BEGIN
         next_retry_at IS NULL
         OR next_retry_at <= CURRENT_TIMESTAMP()
       )
-    ORDER BY source_movie_id
-    LIMIT movie_limit;
+    QUALIFY ROW_NUMBER() OVER (ORDER BY source_movie_id) <= movie_limit;
 
     INSERT `futuremind-rekru-proj.ops.omdb_batches` (
       batch_id,

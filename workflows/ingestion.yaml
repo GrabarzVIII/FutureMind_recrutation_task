@@ -1,0 +1,223 @@
+# One execution at a time. No input arguments; every execution starts a new run.
+main:
+  steps:
+    - initialize:
+        assign:
+          - project: futuremind-rekru-proj
+          - csv_function_url: https://csv-revenue-insert-967740870060.europe-west1.run.app
+          - omdb_function_url: https://omdb-get-func-967740870060.europe-west1.run.app
+          - dataform_region: europe-west1
+          - dataform_repository: futuremind-dataform-repository
+          - dataform_release: production
+          - dataform_service_account: 967740870060-compute@developer.gserviceaccount.com
+          - dataform_parent: ${"projects/" + project + "/locations/" + dataform_region + "/repositories/" + dataform_repository}
+          - csv_uri: gs://futuremind_bucket/ravenue_data/revenues_per_day.csv
+          - run_id: ${text.replace_all(sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID"), "-", "_")}
+          - batch_index: 1
+          - api_budget: 900
+          - batch_size: 50
+          - omdb_prefix: "batch_film_folder "
+          - source_table: ${project + ".staging.revenue_" + run_id}
+          - run_param: {name: run, parameterType: {type: STRING}, parameterValue: {value: '${run_id}'}}
+    - execute:
+        try:
+          steps:
+            - register_run:
+                call: query
+                args:
+                  sql: >-
+                    INSERT `futuremind-rekru-proj.ops.pipeline_runs`
+                    (run_id, source_table, status, started_at)
+                    VALUES (@run, @source, 'running', CURRENT_TIMESTAMP());
+                  parameters:
+                    - ${run_param}
+                    - {name: source, parameterType: {type: STRING}, parameterValue: {value: '${source_table}'}}
+            - load_csv:
+                call: http.post
+                args:
+                  url: ${csv_function_url}
+                  auth: {type: OIDC}
+                  timeout: 1800
+                  body:
+                    run_id: ${run_id}
+                    csv_uri: ${csv_uri}
+                result: csv_load
+            - check_csv_load:
+                switch:
+                  - condition: ${csv_load.body.status != "loaded" or csv_load.body.source_table != source_table}
+                    raise: "CSV function returned an unexpected status or staging table"
+            - merge_csv:
+                call: query
+                args:
+                  sql: ${"CALL `futuremind-rekru-proj.ops.merge_revenue_batch`(@run,@source,@source_file); CALL `futuremind-rekru-proj.ops.register_movies`(); DROP TABLE IF EXISTS `" + source_table + "`;"}
+                  parameters:
+                    - ${run_param}
+                    - {name: source, parameterType: {type: STRING}, parameterValue: {value: '${source_table}'}}
+                    - {name: source_file, parameterType: {type: STRING}, parameterValue: {value: '${csv_uri}'}}
+            - prepare_batch:
+                assign:
+                  - batch_id: ${"omdb_" + run_id + "_" + string(batch_index)}
+                  - stage_table: ${batch_id}
+                  - file_uri: ${"gs://futuremind_bucket/" + omdb_prefix + "/" + batch_id + ".ndjson"}
+                  - batch_param: {name: batch, parameterType: {type: STRING}, parameterValue: {value: '${batch_id}'}}
+            - claim:
+                call: query
+                args:
+                  sql: "CALL `futuremind-rekru-proj.ops.claim_omdb_batch`(@run,@batch,@uri,@size,@budget,@run_budget); SELECT reserved_requests FROM `futuremind-rekru-proj.ops.omdb_batches` WHERE batch_id=@batch;"
+                  parameters:
+                    - ${run_param}
+                    - ${batch_param}
+                    - {name: uri, parameterType: {type: STRING}, parameterValue: {value: '${file_uri}'}}
+                    - {name: size, parameterType: {type: INT64}, parameterValue: {value: '${string(batch_size)}'}}
+                    - {name: budget, parameterType: {type: INT64}, parameterValue: {value: '${string(api_budget)}'}}
+                    - {name: run_budget, parameterType: {type: INT64}, parameterValue: {value: '${string(api_budget)}'}}
+                result: batch
+            - check_budget:
+                switch:
+                  - condition: ${batch.rows[0].f[0].v == "0"}
+                    next: compile_dataform
+            - extract:
+                call: http.post
+                args:
+                  url: ${omdb_function_url}
+                  auth: {type: OIDC}
+                  timeout: 1800
+                  body: {batch_id: '${batch_id}'}
+                result: extraction
+            - create_stage:
+                call: query
+                args:
+                  sql: ${"CREATE TABLE IF NOT EXISTS `" + project + ".staging." + stage_table + "` LIKE `" + project + ".bronze.omdb_responses` OPTIONS(expiration_timestamp=TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)); UPDATE `futuremind-rekru-proj.ops.omdb_batches` SET status='loading' WHERE batch_id=@batch;"}
+                  parameters: ['${batch_param}']
+            - load_responses:
+                call: googleapis.bigquery.v2.jobs.insert
+                args:
+                  projectId: futuremind-rekru-proj
+                  body:
+                    jobReference: {location: EU}
+                    configuration:
+                      load:
+                        sourceUris: ['${extraction.body.file_uri}']
+                        sourceFormat: NEWLINE_DELIMITED_JSON
+                        destinationTable: {projectId: futuremind-rekru-proj, datasetId: staging, tableId: '${stage_table}'}
+                        writeDisposition: WRITE_TRUNCATE
+                result: load_job
+            - check_load:
+                switch:
+                  - condition: ${map.get(load_job, ["status", "errorResult"]) != null}
+                    raise: ${load_job.status.errorResult}
+            - finalize:
+                call: query
+                args:
+                  sql: ${"UPDATE `futuremind-rekru-proj.ops.omdb_batches` SET load_job_id=@job WHERE batch_id=@batch; CALL `futuremind-rekru-proj.ops.finalize_omdb_batch`(@batch,@stage); DROP TABLE IF EXISTS `" + project + ".staging." + stage_table + "`;"}
+                  parameters:
+                    - ${batch_param}
+                    - {name: job, parameterType: {type: STRING}, parameterValue: {value: '${load_job.jobReference.jobId}'}}
+                    - {name: stage, parameterType: {type: STRING}, parameterValue: {value: '${project + ".staging." + stage_table}'}}
+
+            - stop_on_api_error:
+                switch:
+                  - condition: ${extraction.body.stop_requested}
+                    next: compile_dataform
+            - next_batch:
+                assign:
+                  - batch_index: ${batch_index + 1}
+                next: prepare_batch
+
+            - compile_dataform:
+                call: http.post
+                args:
+                  url: ${"https://dataform.googleapis.com/v1/" + dataform_parent + "/compilationResults"}
+                  auth: {type: OAuth2}
+                  timeout: 300
+                  body:
+                    releaseConfig: ${dataform_parent + "/releaseConfigs/" + dataform_release}
+                result: compilation
+            - check_compilation:
+                switch:
+                  - condition: ${len(default(map.get(compilation.body, "compilationErrors"), [])) > 0}
+                    raise: ${json.encode_to_string(compilation.body.compilationErrors)}
+            - start_dataform:
+                call: http.post
+                args:
+                  url: ${"https://dataform.googleapis.com/v1/" + dataform_parent + "/workflowInvocations"}
+                  auth: {type: OAuth2}
+                  body:
+                    compilationResult: ${compilation.body.name}
+                    invocationConfig:
+                      serviceAccount: ${dataform_service_account}
+                result: invocation
+            - get_dataform_status:
+                call: http.get
+                args:
+                  url: ${"https://dataform.googleapis.com/v1/" + invocation.body.name}
+                  auth: {type: OAuth2}
+                result: dataform_status
+            - check_dataform_status:
+                switch:
+                  - condition: ${dataform_status.body.state == "SUCCEEDED"}
+                    next: finish_run
+                  - condition: ${dataform_status.body.state == "RUNNING" or dataform_status.body.state == "CANCELING"}
+                    next: wait_dataform
+                next: dataform_failed
+            - wait_dataform:
+                call: sys.sleep
+                args:
+                  seconds: 30
+                next: get_dataform_status
+            - dataform_failed:
+                raise: ${"Dataform execution " + invocation.body.name + " ended with state " + dataform_status.body.state}
+            - finish_run:
+                call: query
+                args:
+                  sql: >-
+                    UPDATE `futuremind-rekru-proj.ops.pipeline_runs` SET
+                    status=IF(EXISTS(SELECT 1 FROM `futuremind-rekru-proj.ops.movie_fetch_control`
+                    WHERE status IN ('pending','retry_pending','in_progress')),'partial','succeeded'),
+                    finished_at=CURRENT_TIMESTAMP() WHERE run_id=@run
+                  parameters: ['${run_param}']
+        except:
+          as: error
+          steps:
+            - record_failure:
+                call: query
+                args:
+                  sql: "UPDATE `futuremind-rekru-proj.ops.pipeline_runs` SET status='failed',finished_at=CURRENT_TIMESTAMP(),last_error=@error WHERE run_id=@run"
+                  parameters:
+                    - ${run_param}
+                    - {name: error, parameterType: {type: STRING}, parameterValue: {value: '${json.encode_to_string(error)}'}}
+            - propagate:
+                raise: ${error}
+    - result:
+        return: {run_id: '${run_id}', batch_id: '${batch_id}', dataform_invocation: '${invocation.body.name}', dataform_state: '${dataform_status.body.state}', message: "Ingestion and Dataform completed; inspect ops tables for remaining movies."}
+
+# The connector waits for the BigQuery job; check job-level errors explicitly.
+query:
+  params: [sql, parameters]
+  steps:
+    - submit:
+        call: googleapis.bigquery.v2.jobs.insert
+        args:
+          projectId: futuremind-rekru-proj
+          body:
+            jobReference: {location: EU}
+            configuration:
+              query:
+                query: ${sql}
+                useLegacySql: false
+                parameterMode: NAMED
+                queryParameters: ${parameters}
+        result: job
+    - check:
+        switch:
+          - condition: ${map.get(job, ["status", "errorResult"]) != null}
+            raise: ${job.status.errorResult}
+    - results:
+        call: googleapis.bigquery.v2.jobs.getQueryResults
+        args:
+          projectId: futuremind-rekru-proj
+          jobId: ${job.jobReference.jobId}
+          location: EU
+        result: rows
+    - done:
+        return: ${rows}
