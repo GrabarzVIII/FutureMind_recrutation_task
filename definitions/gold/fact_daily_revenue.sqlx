@@ -3,7 +3,7 @@ config {
   schema: "gold",
   name: "fact_daily_revenue",
   bigquery: {
-    partitionBy: "revenue_date",
+    partitionBy: "DATE_TRUNC(revenue_date, MONTH)",
     clusterBy: ["movie_key", "distributor_key"]
   }
 }
